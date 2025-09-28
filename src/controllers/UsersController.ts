@@ -1,68 +1,96 @@
 import { NextFunction, Request, Response } from "express";
 import { UsersService } from "../services/UsersService";
-import  {userCreateSchema,userLoginSchema, entrepriseCreateSchema} from "../validators/validate"
-
+import { userCreateSchema, userLoginSchema, entrepriseCreateSchema } from "../validators/validate"
 
 const service = new UsersService
 
 export class UsersController {
 
+    async createUser(req: Request, res: Response) {
+        const users = userCreateSchema.safeParse(req.body)
+        if (!users.success) return res.status(400).json({ message: "error", error: users.error.format });
+        
+        try {
+            // Récupération de l'utilisateur authentifié
+            const caller = req.user!; // L'utilisateur doit être authentifié
+            const newUser = await service.create(req.body, caller)
+            res.status(200).json({
+                message: "Utilisateur créé avec succès",
+                data: newUser
+            })
+        } catch (error: any) {
+            res.status(403).json({ message: error.message })
+        }
+    }
 
-    async createUser(req: Request, res: Response){
-          const users = userCreateSchema.safeParse(req.body)
-            if(!users.success)return res.status(400).json({message :"error", error : users.error.format});
-            try {
-              const caller = req.user || { role: "SUPER_ADMIN", entrepriseId: null }; // Pour test initial
-              const a = await service.create(req.body, caller)
-              res.status(200).json({
-                message:"Utilisateur créé avec succès",
-                data:a
-              })
-            } catch (error: any) {
-              res.status(403).json({message: error.message})
+    async createEntreprise(req: Request, res: Response) {
+        const entreprise = entrepriseCreateSchema.safeParse(req.body)
+        if (!entreprise.success) return res.status(400).json({ message: "error", error: entreprise.error.format });
+        
+        try {
+            // Seul le SUPER_ADMIN peut créer des entreprises
+            if (req.user!.role !== 'SUPER_ADMIN') {
+                return res.status(403).json({ message: "Seul un Super Admin peut créer des entreprises" });
             }
+            
+            const entrepriseCreated = await service.createEntreprise(req.body, req.user!.id)
+            res.status(200).json({
+                message: "Entreprise créée avec succès",
+                data: entrepriseCreated
+            })
+        } catch (error: any) {
+            res.status(403).json({ message: error.message })
+        }
     }
 
-    async createEntreprise(req: Request, res: Response){
-      const entreprise = entrepriseCreateSchema.safeParse(req.body)
-      if(!entreprise.success)return res.status(400).json({message :"error", error : entreprise.error.format});
-      try {
-        const a = await service.createEntreprise(req.body, req.user!.id)
-        res.status(200).json({
-          message:"Entreprise créée avec succès",
-          data:a
-        })
-      } catch (error: any) {
-        res.status(403).json({message: error.message})
-      }
+    async getEntreprises(req: Request, res: Response) {
+        try {
+            const entreprises = await service.getAllEntreprises(req.user!)
+            res.status(200).json({
+                message: "Entreprises récupérées",
+                data: entreprises
+            })
+        } catch (error: any) {
+            res.status(500).json({ message: error.message })
+        }
     }
 
-    async getEntreprises(req: Request, res: Response){
-      try {
-        const a = await service.getAllEntreprises(req.user!)
-        res.status(200).json({
-          message:"Entreprises récupérées",
-          data:a
-        })
-      } catch (error: any) {
-        res.status(500).json({message: error.message})
-      }
+    async login(req: Request, res: Response) {
+        const verif = userLoginSchema.safeParse(req.body)
+        if (!verif.success) return res.status(401).json({ message: "invalide", error: verif.error.format() });
+        
+        try {
+            const loginResult = await service.loginUser(req.body)
+            res.status(200).json({
+                message: 'Connexion réussie',
+                data: loginResult
+            })
+        } catch (error: any) {
+            res.status(401).json({ message: error.message })
+        }
     }
 
-     async login(req: Request, res: Response){
-      const verif = userLoginSchema.safeParse(req.body)
-      if(!verif.success) return res.status(401).json({message:"invalide",error: verif.error.format()});
-      const a= await service.loginUser(req.body)
-      res.status(200).json({
-        message :'reussi',
-        data:a
-      })
-     }
-    
-      
-  
-      }
-    
+    async getAdminsAndCaissiers(req: Request, res: Response) {
+        const entrepriseId = Number(req.params.id);
+        if (!entrepriseId) return res.status(400).json({ message: "Id d'entreprise invalide" });
+        try {
+            const result = await service.getAdminsAndCaissiers(entrepriseId, req.user!);
+            res.status(200).json(result);
+        } catch (error: any) {
+            res.status(403).json({ message: error.message });
+        }
+    }
 
-
-   
+    async getUsersByEntreprise(req: Request, res: Response) {
+        try {
+            const entrepriseId = req.params.entrepriseId ? parseInt(req.params.entrepriseId) : undefined;
+            const users = await service.getUsersByEntreprise(req.user!, entrepriseId);
+            res.status(200).json({
+                message: "Utilisateurs récupérés",
+                data: users
+            });
+        } catch (error: any) {
+            res.status(403).json({ message: error.message });
+        }
+    }
+}

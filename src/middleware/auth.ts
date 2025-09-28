@@ -8,8 +8,8 @@ declare global {
       user?: {
         id: number;
         email: string;
-        role: string; // Format du token JWT
-        entrepriseId?: number | null; // Peut être null comme dans Prisma
+        role: string;
+        entrepriseId?: number | null;
       };
     }
   }
@@ -28,14 +28,49 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
       return res.status(403).json({ message: 'Token invalide' });
     }
 
-    req.user = decoded as Users;
+    req.user = decoded;
     next();
   });
 };
 
+// Middleware pour SUPER_ADMIN uniquement
 export const requireSuperAdmin = (req: Request, res: Response, next: NextFunction) => {
-  if (!req.user || (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN')) {
-    return res.status(403).json({ message: 'Accès refusé : Super Admin ou Admin requis' });
+  if (!req.user || req.user.role !== 'SUPER_ADMIN') {
+    return res.status(403).json({ message: 'Accès refusé : Super Admin requis' });
   }
+  next();
+};
+
+// Middleware pour ADMIN ou SUPER_ADMIN
+export const requireAdminOrSuperAdmin = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user || (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN')) {
+    return res.status(403).json({ message: 'Accès refusé : Admin ou Super Admin requis' });
+  }
+  next();
+};
+
+// Middleware pour vérifier que l'ADMIN opère dans sa propre entreprise
+export const requireSameEntreprise = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Authentification requise' });
+  }
+
+  // SUPER_ADMIN peut tout faire
+  if (req.user.role === 'SUPER_ADMIN') {
+    return next();
+  }
+
+  // ADMIN doit avoir une entrepriseId et elle doit correspondre à celle de l'utilisateur à créer
+  if (req.user.role === 'ADMIN') {
+    if (!req.user.entrepriseId) {
+      return res.status(403).json({ message: 'Admin non associé à une entreprise' });
+    }
+    
+    // Vérifier que l'utilisateur à créer appartient à la même entreprise
+    if (req.body.entrepriseId && req.body.entrepriseId !== req.user.entrepriseId) {
+      return res.status(403).json({ message: 'Vous ne pouvez créer des utilisateurs que pour votre entreprise' });
+    }
+  }
+
   next();
 };
