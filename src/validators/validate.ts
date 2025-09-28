@@ -20,6 +20,16 @@ export const entrepriseCreateSchema = z.object({
   logo: z.string().optional(),
   adresse: z.string().min(1, { message: "L'adresse est requise" }),
   paiement: z.string().default("XOF"),
+  adminNom: z.string().optional(),
+  adminEmail: z.string().email().optional(),
+  adminPassword: z.string().min(8, { message: "Mot de passe admin trop court (min 8 caractères)" }).optional(),
+}).refine((data) => {
+  const hasAdminFields = data.adminNom && data.adminEmail && data.adminPassword;
+  const hasNone = !data.adminNom && !data.adminEmail && !data.adminPassword;
+  return hasAdminFields || hasNone;
+}, {
+  message: "Tous les champs admin (nom, email, password) doivent être fournis ensemble ou aucun",
+  path: ["adminNom"],
 });
 
 // Exemple d'inférence du type TypeScript à partir du schéma

@@ -34,8 +34,7 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
 };
 
 export const requireSuperAdmin = (req: Request, res: Response, next: NextFunction) => {
-  // Accepte super-admin et admin
-  if (!req.user || (req.user.role !== 'super-admin' && req.user.role !== 'admin')) {
+  if (!req.user || (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN')) {
     return res.status(403).json({ message: 'Accès refusé : Super Admin ou Admin requis' });
   }
   next();

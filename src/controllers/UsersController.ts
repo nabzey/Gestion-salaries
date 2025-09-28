@@ -11,11 +11,16 @@ export class UsersController {
     async createUser(req: Request, res: Response){
           const users = userCreateSchema.safeParse(req.body)
             if(!users.success)return res.status(400).json({message :"error", error : users.error.format});
-            const a=await service.create(req.body)
-            res.status(200).json({
-              message:"reussi",
-              data:a
-            })
+            try {
+              const caller = req.user || { role: "SUPER_ADMIN", entrepriseId: null }; // Pour test initial
+              const a = await service.create(req.body, caller)
+              res.status(200).json({
+                message:"Utilisateur créé avec succès",
+                data:a
+              })
+            } catch (error: any) {
+              res.status(403).json({message: error.message})
+            }
     }
 
     async createEntreprise(req: Request, res: Response){

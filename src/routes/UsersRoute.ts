@@ -6,11 +6,11 @@ const cont = new UsersController();
 const router = Router();
 
 
-router.post('/',cont.createUser)
+router.post('/', cont.createUser)
 router.post('/auth',cont.login)
 
 // Routes protégées
 router.post('/entreprises', authenticateToken, requireSuperAdmin, cont.createEntreprise)
-router.get('/entreprises', authenticateToken, cont.getEntreprises)
+router.get('/entreprises', authenticateToken,requireSuperAdmin, cont.getEntreprises)
 
 export default router;
