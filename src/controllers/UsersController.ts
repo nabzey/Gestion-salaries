@@ -25,7 +25,7 @@ export class UsersController {
 
     async createEntreprise(req: Request, res: Response) {
         const entreprise = entrepriseCreateSchema.safeParse(req.body)
-        if (!entreprise.success) return res.status(400).json({ message: "error", error: entreprise.error.format });
+        if (!entreprise.success) return res.status(400).json({ message: "Validation error", details: entreprise.error.format() });
         
         try {
             // Seul le SUPER_ADMIN peut créer des entreprises
@@ -39,7 +39,8 @@ export class UsersController {
                 data: entrepriseCreated
             })
         } catch (error: any) {
-            res.status(403).json({ message: error.message })
+            console.error("Create entreprise error:", error);
+            res.status(500).json({ message: "Server error", details: error.message })
         }
     }
 

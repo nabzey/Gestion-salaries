@@ -1,6 +1,8 @@
-import { Users, Entreprises } from "@prisma/client";
+import { Users, Entreprises, PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 import Jwt from "jsonwebtoken";
+import mysql from 'mysql2/promise';
+import { execSync } from 'child_process';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -55,13 +57,20 @@ export class UsersService {
     if (!isPassValid) throw new Error("Mot de passe incorrect");
 
     const role = user.role;
+    let dbName: string | null = null;
+
+    if (user.entrepriseId) {
+      const entreprise = await this.globalRepos.findEntrepriseById(user.entrepriseId);
+      dbName = entreprise?.dbName || null;
+    }
 
     const accesToken = Jwt.sign(
       {
         id: user.id,
         email: user.email,
         role: role,
-        entrepriseId: user.entrepriseId
+        entrepriseId: user.entrepriseId,
+        dbName: dbName || (null as any)
       },
       process.env.JWT_SECRETE as string,
       { expiresIn: "1h" }
@@ -84,7 +93,7 @@ export class UsersService {
     if (!user) {
       throw new Error("Utilisateur non trouvé");
     }
-    
+
     if (user.role !== "SUPER_ADMIN") {
       throw new Error("Accès refusé : Seul un Super Admin peut créer des entreprises");
     }
@@ -94,11 +103,48 @@ export class UsersService {
       logo: data.logo ?? null,
       adresse: data.adresse,
       paiement: data.paiement || "XOF",
+      dbName: null, // temporaire
       createdAt: new Date(),
       updatedAt: new Date()
-    };
+    } as any;
 
     const entreprise = await this.globalRepos.createEntreprise(entrepriseData);
+
+    // Générer le nom de la DB tenant
+    const dbName = `tenant_${entreprise.id}`;
+
+    // Mettre à jour l'entreprise avec le dbName
+    await this.globalRepos.updateEntreprise(entreprise.id, { dbName });
+
+    // Créer la DB tenant
+    const parsed = new URL(process.env.DATABASE_URL!);
+    const dbUser = parsed.username;
+    const dbPass = parsed.password;
+    const host = parsed.hostname;
+    const port = parsed.port || '3306';
+    const tenantUrl = `mysql://${dbUser}:${dbPass}@${host}:${port}/${dbName}`;
+
+    try {
+      const connection = await mysql.createConnection({
+        host: host,
+        user: dbUser,
+        password: dbPass,
+        port: parseInt(port),
+      });
+      await connection.execute(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
+      await connection.end();
+    } catch (error) {
+      console.error('Error creating DB:', error);
+      throw new Error('Failed to create tenant DB');
+    }
+
+    try {
+      process.env.TENANT_DATABASE_URL = tenantUrl;
+      execSync(`npx prisma db push --schema=./prisma/tenant-schema.prisma --accept-data-loss`, { stdio: 'inherit' });
+    } catch (error) {
+      console.error('Error pushing schema:', error);
+      throw new Error('Failed to initialize tenant DB');
+    }
 
     // Création automatique de l'admin de l'entreprise si les données sont fournies
     if (data.adminNom && data.adminEmail && data.adminPassword) {
@@ -126,7 +172,7 @@ export class UsersService {
       await this.create(caissierData, { role: "SUPER_ADMIN", entrepriseId: null, id: userId });
     }
 
-    return entreprise;
+    return { ...entreprise, dbName };
   }
 
   async getAllEntreprises(user: { role: string; entrepriseId?: number | null; id: number }) {

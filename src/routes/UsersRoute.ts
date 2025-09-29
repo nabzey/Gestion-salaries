@@ -5,11 +5,11 @@ import { authenticateToken, requireSuperAdmin, requireAdminOrSuperAdmin } from '
 const cont = new UsersController();
 const router = Router();
 
-router.post('/auth', cont.login)
-router.post('/', authenticateToken, requireAdminOrSuperAdmin, cont.createUser)
-router.post('/entreprises', authenticateToken, requireSuperAdmin, cont.createEntreprise)
-router.get('/entreprises', authenticateToken, requireSuperAdmin, cont.getEntreprises)
-router.get('/entreprise/:id/utilisateurs', authenticateToken, cont.getAdminsAndCaissiers)
-router.get('/entreprises/:entrepriseId/utilisateurs', authenticateToken, cont.getUsersByEntreprise)
+router.post('/auth', cont.login.bind(cont))
+router.post('/', authenticateToken, requireAdminOrSuperAdmin, cont.createUser.bind(cont))
+router.post('/entreprises', authenticateToken, requireSuperAdmin, cont.createEntreprise.bind(cont))
+router.get('/entreprises', authenticateToken, requireSuperAdmin, cont.getEntreprises.bind(cont))
+router.get('/entreprise/:id/utilisateurs', authenticateToken, cont.getAdminsAndCaissiers.bind(cont))
+router.get('/entreprises/:entrepriseId/utilisateurs', authenticateToken, cont.getUsersByEntreprise.bind(cont))
 
 export default router;

@@ -1,0 +1,89 @@
+// Tenant schema for each enterprise DB
+generator tenantClient {
+  provider = "prisma-client-js"
+  output   = "../src/generated/tenant"
+}
+
+datasource tenant {
+  provider = "mysql"
+  url      = env("TENANT_DATABASE_URL")
+}
+
+enum TypeContrat {
+  JOURNALIER
+  FIXE
+  HONORAIRE
+}
+
+enum ModePaiement {
+  ESPECES
+  VIREMENT_BANCAIRE
+  ORANGE_MONEY
+  WAVE
+}
+
+enum StatusPayRun {
+  BROUILLON
+  APPROUVE
+  CLOTURE
+}
+
+enum StatusPayslip {
+  PAYE
+  PARTIEL
+  EN_ATTENTE
+}
+
+model Employee {
+  id                  Int           @id @default(autoincrement())
+  nom                 String
+  poste               String
+  typeContrat         TypeContrat
+  tauxSalaire         Decimal
+  joursTravailles     Int?          // for journalier
+  coordonneesBancaires String?
+  actif               Boolean       @default(true)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  payslips            Payslip[]
+}
+
+model PayRun {
+  id        Int           @id @default(autoincrement())
+  periode   DateTime
+  type      String        // MENSUEL, HEBDOMADAIRE, JOURNALIER
+  status    StatusPayRun  @default(BROUILLON)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  payslips  Payslip[]
+}
+
+model Payslip {
+  id          Int             @id @default(autoincrement())
+  employeeId  Int
+  payRunId    Int
+  brut        Decimal
+  deductions  Decimal         @default(0)
+  net         Decimal
+  status      StatusPayslip   @default(EN_ATTENTE)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  employee    Employee        @relation(fields: [employeeId], references: [id])
+  payRun      PayRun          @relation(fields: [payRunId], references: [id])
+  payments    Payment[]
+}
+
+model Payment {
+  id          Int           @id @default(autoincrement())
+  payslipId   Int
+  montant     Decimal
+  mode        ModePaiement
+  date        DateTime      @default(now())
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  payslip     Payslip       @relation(fields: [payslipId], references: [id])
+}

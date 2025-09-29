@@ -1,14 +1,9 @@
 import { Users, Entreprises, PrismaClient } from "@prisma/client";
 
-const prismaGlobal = new PrismaClient({
-  datasources: {
-    db: { url: process.env.DATABASE_URL ?? "" }
-  }
-});
-
 export class UsersRepository {
+  private prisma = new PrismaClient();
   async findById(id: number): Promise<Users | null> {
-    return await prismaGlobal.users.findUnique({ 
+    return await this.prisma.users.findUnique({
       where: { id },
       include: {
         entreprise: true // Inclure les données de l'entreprise si nécessaire
@@ -17,7 +12,7 @@ export class UsersRepository {
   }
 
   async create(data: Omit<Users, "id">): Promise<Users> {
-    return await prismaGlobal.users.create({ 
+    return await this.prisma.users.create({
       data,
       include: {
         entreprise: true
@@ -26,7 +21,7 @@ export class UsersRepository {
   }
 
   async findByEmail(email: string): Promise<Users | null> {
-    return await prismaGlobal.users.findUnique({ 
+    return await this.prisma.users.findUnique({
       where: { email },
       include: {
         entreprise: true
@@ -35,7 +30,7 @@ export class UsersRepository {
   }
 
   async findAllUsers(): Promise<Users[]> {
-    return await prismaGlobal.users.findMany({
+    return await this.prisma.users.findMany({
       include: {
         entreprise: true
       }
@@ -43,7 +38,7 @@ export class UsersRepository {
   }
 
   async findUsersByEntrepriseId(entrepriseId: number): Promise<Users[]> {
-    return await prismaGlobal.users.findMany({
+    return await this.prisma.users.findMany({
       where: { entrepriseId },
       include: {
         entreprise: true
@@ -52,7 +47,7 @@ export class UsersRepository {
   }
 
   async findUsersByRole(role: string): Promise<Users[]> {
-    return await prismaGlobal.users.findMany({
+    return await this.prisma.users.findMany({
       where: {
         role: role as any // Cast to 'any' or replace with the correct enum type, e.g. 'Role'
       },
@@ -63,14 +58,14 @@ export class UsersRepository {
   }
 
   async findUsersByEntrepriseIdAndRole(entrepriseId: number, role: "ADMIN" | "CAISSIER"): Promise<Users[]> {
-    return await prismaGlobal.users.findMany({
+    return await this.prisma.users.findMany({
       where: { entrepriseId, role }
     });
   }
 
   // Méthodes pour les entreprises
   async createEntreprise(data: Omit<Entreprises, "id">): Promise<Entreprises> {
-    return await prismaGlobal.entreprises.create({ 
+    return await this.prisma.entreprises.create({
       data,
       include: {
         users: true // Inclure les utilisateurs de l'entreprise
@@ -79,7 +74,7 @@ export class UsersRepository {
   }
 
   async findAllEntreprises(): Promise<Entreprises[]> {
-    return await prismaGlobal.entreprises.findMany({
+    return await this.prisma.entreprises.findMany({
       include: {
         users: true,
         _count: {
@@ -92,7 +87,7 @@ export class UsersRepository {
   }
 
   async findEntrepriseById(id: number): Promise<Entreprises | null> {
-    return await prismaGlobal.entreprises.findUnique({ 
+    return await this.prisma.entreprises.findUnique({
       where: { id },
       include: {
         users: true,
@@ -106,7 +101,7 @@ export class UsersRepository {
   }
 
   async updateEntreprise(id: number, data: Partial<Omit<Entreprises, "id">>): Promise<Entreprises> {
-    return await prismaGlobal.entreprises.update({
+    return await this.prisma.entreprises.update({
       where: { id },
       data: {
         ...data,
@@ -120,11 +115,11 @@ export class UsersRepository {
 
   async deleteEntreprise(id: number): Promise<void> {
     // Attention : supprimer d'abord les utilisateurs ou les déplacer
-    await prismaGlobal.users.deleteMany({
+    await this.prisma.users.deleteMany({
       where: { entrepriseId: id }
     });
-    
-    await prismaGlobal.entreprises.delete({
+
+    await this.prisma.entreprises.delete({
       where: { id }
     });
   }

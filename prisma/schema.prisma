@@ -20,6 +20,7 @@ model Entreprises {
   logo      String?
   adresse   String
   paiement  String    @default("XOF") //espece de paiement
+  dbName    String?   @unique // nom de la DB tenant
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
@@ -44,3 +45,7 @@ enum Role {
   ADMIN
   CAISSIER
 }
+
+
+
+

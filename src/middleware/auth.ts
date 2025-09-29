@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import Jwt from 'jsonwebtoken';
-import { Users } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+
+const globalPrisma = new PrismaClient();
 
 declare global {
   namespace Express {
@@ -10,12 +12,13 @@ declare global {
         email: string;
         role: string;
         entrepriseId?: number | null;
+        dbName?: string | null;
       };
     }
   }
 }
 
-export const authenticateToken = (req: Request, res: Response, next: NextFunction) => {
+export const authenticateToken = async (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -23,12 +26,28 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
     return res.status(401).json({ message: 'Token manquant' });
   }
 
-  Jwt.verify(token, process.env.JWT_SECRETE as string, (err: any, decoded: any) => {
+  Jwt.verify(token, process.env.JWT_SECRETE as string, async (err: any, decoded: any) => {
     if (err) {
       return res.status(403).json({ message: 'Token invalide' });
     }
 
     req.user = decoded;
+
+    // Add dbName if entrepriseId exists
+    if (req.user && req.user.entrepriseId) {
+      try {
+        const entreprise = await globalPrisma.entreprises.findUnique({
+          where: { id: req.user.entrepriseId },
+          select: { dbName: true }
+        });
+        if (entreprise) {
+          req.user.dbName = entreprise.dbName;
+        }
+      } catch (error) {
+        console.error('Error fetching entreprise dbName:', error);
+      }
+    }
+
     next();
   });
 };
@@ -49,6 +68,14 @@ export const requireAdminOrSuperAdmin = (req: Request, res: Response, next: Next
   next();
 };
 
+// Middleware pour ADMIN ou CAISSIER
+export const requireAdminOrCaissier = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user || (req.user.role !== 'ADMIN' && req.user.role !== 'CAISSIER')) {
+    return res.status(403).json({ message: 'Accès refusé : Admin ou Caissier requis' });
+  }
+  next();
+};
+
 // Middleware pour vérifier que l'ADMIN opère dans sa propre entreprise
 export const requireSameEntreprise = (req: Request, res: Response, next: NextFunction) => {
   if (!req.user) {
@@ -65,7 +92,7 @@ export const requireSameEntreprise = (req: Request, res: Response, next: NextFun
     if (!req.user.entrepriseId) {
       return res.status(403).json({ message: 'Admin non associé à une entreprise' });
     }
-    
+
     // Vérifier que l'utilisateur à créer appartient à la même entreprise
     if (req.body.entrepriseId && req.body.entrepriseId !== req.user.entrepriseId) {
       return res.status(403).json({ message: 'Vous ne pouvez créer des utilisateurs que pour votre entreprise' });
