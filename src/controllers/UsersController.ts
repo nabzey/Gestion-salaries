@@ -94,4 +94,37 @@ export class UsersController {
             res.status(403).json({ message: error.message });
         }
     }
+
+    async initEntrepriseData(req: Request, res: Response) {
+        const id = Number(req.params.id);
+        if (!id) return res.status(400).json({ message: "Id d'entreprise invalide" });
+        try {
+            const result = await service.initEntrepriseData(id, req.user!);
+            res.status(200).json({ message: "Initialisation effectuée", data: result });
+        } catch (error: any) {
+            res.status(403).json({ message: error.message });
+        }
+    }
+
+    async impersonateEntreprise(req: Request, res: Response) {
+        const id = Number(req.params.id);
+        if (!id) return res.status(400).json({ message: "Id d'entreprise invalide" });
+        try {
+            const result = await service.impersonateEntreprise(id, { role: req.user!.role, id: req.user!.id });
+            res.status(200).json({ message: "Contexte entreprise établi", data: result });
+        } catch (error: any) {
+            res.status(403).json({ message: error.message });
+        }
+    }
+
+    async getEntreprisePersonnel(req: Request, res: Response) {
+        const id = Number(req.params.id);
+        if (!id) return res.status(400).json({ message: "Id d'entreprise invalide" });
+        try {
+            const result = await service.getEntreprisePersonnel(id, req.user!);
+            res.status(200).json({ message: "Personnel récupéré", data: result });
+        } catch (error: any) {
+            res.status(403).json({ message: error.message });
+        }
+    }
 }

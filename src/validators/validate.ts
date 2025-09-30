@@ -88,8 +88,17 @@ export const employeeCreateSchema = z.object({
   poste: z.string().min(1, { message: "Le poste est requis" }),
   typeContrat: TypeContratEnum,
   tauxSalaire: z.number().positive({ message: "Le taux salaire doit être positif" }),
+  joursTravailles: z.number().int().positive().optional(),
   coordonneesBancaires: z.string().optional(),
   actif: z.boolean().optional(),
+}).refine((data) => {
+  if (data.typeContrat === "JOURNALIER") {
+    return typeof data.joursTravailles === 'number' && data.joursTravailles > 0;
+  }
+  return true;
+}, {
+  message: "Le nombre de jours travaillés est requis et doit être > 0 pour les contrats journaliers",
+  path: ["joursTravailles"],
 });
 
 // Schéma pour mettre à jour un employé
@@ -98,6 +107,7 @@ export const employeeUpdateSchema = z.object({
   poste: z.string().min(1).optional(),
   typeContrat: TypeContratEnum.optional(),
   tauxSalaire: z.number().positive().optional(),
+  joursTravailles: z.number().int().positive().optional(),
   coordonneesBancaires: z.string().optional(),
   actif: z.boolean().optional(),
 });

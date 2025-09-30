@@ -6,6 +6,8 @@ import { execSync } from 'child_process';
 import dotenv from 'dotenv';
 dotenv.config();
 
+import { getTenantPrisma } from "../utils/tenantPrisma";
+
 import { UsersRepository } from "../repositories/UsersRepository";
 
 export class UsersService {
@@ -58,10 +60,22 @@ export class UsersService {
 
     const role = user.role;
     let dbName: string | null = null;
+    let entreprisePayload: any = null;
 
     if (user.entrepriseId) {
       const entreprise = await this.globalRepos.findEntrepriseById(user.entrepriseId);
       dbName = entreprise?.dbName || null;
+      if (entreprise) {
+        // Inclure des infos d'entreprise dans la réponse pour ADMIN/CAISSIER
+        entreprisePayload = {
+          id: entreprise.id,
+          nom: entreprise.nom,
+          logo: entreprise.logo,
+          adresse: entreprise.adresse,
+          paiement: entreprise.paiement,
+          dbName: entreprise.dbName,
+        };
+      }
     }
 
     const accesToken = Jwt.sign(
@@ -85,7 +99,12 @@ export class UsersService {
       { expiresIn: "1d" }
     );
 
-    return { user: { id: user.id, email: user.email, role: user.role, nom: user.nom }, accesToken, refreshToken };
+    const userPayload: any = { id: user.id, email: user.email, role: user.role, nom: user.nom };
+    if (entreprisePayload) {
+      userPayload.entreprise = entreprisePayload;
+    }
+
+    return { user: userPayload, accesToken, refreshToken };
   }
 
   async createEntreprise(data: Omit<Entreprises, "id"> & { adminNom?: string; adminEmail?: string; adminPassword?: string; caissierNom?: string; caissierEmail?: string; caissierPassword?: string }, userId: number) {
@@ -98,23 +117,9 @@ export class UsersService {
       throw new Error("Accès refusé : Seul un Super Admin peut créer des entreprises");
     }
 
-    const entrepriseData = {
-      nom: data.nom,
-      logo: data.logo ?? null,
-      adresse: data.adresse,
-      paiement: data.paiement || "XOF",
-      dbName: null, // temporaire
-      createdAt: new Date(),
-      updatedAt: new Date()
-    } as any;
-
-    const entreprise = await this.globalRepos.createEntreprise(entrepriseData);
-
     // Générer le nom de la DB tenant
-    const dbName = `tenant_${entreprise.id}`;
-
-    // Mettre à jour l'entreprise avec le dbName
-    await this.globalRepos.updateEntreprise(entreprise.id, { dbName });
+    const tempEntreprise = { id: Date.now() }; // temporaire pour générer dbName
+    const dbName = `tenant_${tempEntreprise.id}`;
 
     // Créer la DB tenant
     const parsed = new URL(process.env.DATABASE_URL!);
@@ -125,6 +130,7 @@ export class UsersService {
     const tenantUrl = `mysql://${dbUser}:${dbPass}@${host}:${port}/${dbName}`;
 
     try {
+      console.log('[CREATE ENTREPRISE] Connexion MySQL pour création DB', { host, dbUser, port, dbName });
       const connection = await mysql.createConnection({
         host: host,
         user: dbUser,
@@ -133,18 +139,41 @@ export class UsersService {
       });
       await connection.execute(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
       await connection.end();
+      console.log('[CREATE ENTREPRISE] Base de données créée ou déjà existante');
     } catch (error) {
-      console.error('Error creating DB:', error);
-      throw new Error('Failed to create tenant DB');
+      console.error('[CREATE ENTREPRISE] Erreur création DB:', error);
+      if (error instanceof Error) {
+        throw new Error('Failed to create tenant DB: ' + error.message + '\nStack: ' + error.stack);
+      } else {
+        throw new Error('Failed to create tenant DB: ' + JSON.stringify(error));
+      }
     }
 
     try {
       process.env.TENANT_DATABASE_URL = tenantUrl;
-      execSync(`npx prisma db push --schema=./prisma/tenant-schema.prisma --accept-data-loss`, { stdio: 'inherit' });
+      console.log('[CREATE ENTREPRISE] Push Prisma sur DB tenant', tenantUrl);
+      execSync(`npx prisma db push --schema=./prisma/tenant-schema.prisma --accept-data-loss`, {
+        stdio: 'inherit',
+        env: { ...process.env, DATABASE_URL: tenantUrl, TENANT_DATABASE_URL: tenantUrl }
+      });
+      console.log('[CREATE ENTREPRISE] Prisma push terminé');
     } catch (error) {
-      console.error('Error pushing schema:', error);
-      throw new Error('Failed to initialize tenant DB');
+      console.error('[CREATE ENTREPRISE] Erreur Prisma push:', error);
+      throw new Error('Failed to initialize tenant DB: ' + (error as Error).message);
     }
+
+    // Créer l'entreprise avec le dbName
+    const entrepriseData = {
+      nom: data.nom,
+      logo: data.logo ?? null,
+      adresse: data.adresse,
+      paiement: data.paiement || "XOF",
+      dbName: dbName,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as any;
+
+    const entreprise = await this.globalRepos.createEntreprise(entrepriseData);
 
     // Création automatique de l'admin de l'entreprise si les données sont fournies
     if (data.adminNom && data.adminEmail && data.adminPassword) {
@@ -216,5 +245,130 @@ export class UsersService {
       return { admins, caissiers };
     }
     throw new Error("Accès refusé");
+  }
+
+  async getEntreprisePersonnel(entrepriseId: number, caller: { role: string; entrepriseId?: number | null }) {
+    if (caller.role !== 'SUPER_ADMIN' && caller.entrepriseId !== entrepriseId) {
+      throw new Error('Accès refusé');
+    }
+    const entreprise = await this.globalRepos.findEntrepriseById(entrepriseId);
+    if (!entreprise || !entreprise.dbName) throw new Error('Entreprise introuvable');
+
+    // Users from global DB
+    const admins = await this.globalRepos.findUsersByEntrepriseIdAndRole(entrepriseId, 'ADMIN');
+    const caissiers = await this.globalRepos.findUsersByEntrepriseIdAndRole(entrepriseId, 'CAISSIER');
+
+    // Employees from tenant DB
+    const tenant = getTenantPrisma(entreprise.dbName);
+    const employees = await tenant.employee.findMany();
+
+    return { admins, caissiers, employees };
+  }
+
+  // Initialise des données par défaut (employés, payrun, bulletins) dans la base tenant d'une entreprise
+  async initEntrepriseData(
+    entrepriseId: number,
+    caller: { role: string; entrepriseId?: number | null; id: number }
+  ) {
+    if (caller.role !== "SUPER_ADMIN") {
+      throw new Error("Accès refusé : Super Admin requis");
+    }
+
+    const entreprise = await this.globalRepos.findEntrepriseById(entrepriseId);
+    if (!entreprise) throw new Error("Entreprise non trouvée");
+    if (!entreprise.dbName) throw new Error("dbName manquant pour cette entreprise");
+
+    const tenant = getTenantPrisma(entreprise.dbName);
+
+    // Si déjà des données existent, ne pas dupliquer
+    const existingEmp = await tenant.employee.count();
+    if (existingEmp > 0) {
+      const counts = {
+        employees: existingEmp,
+        payRuns: await tenant.payRun.count(),
+        payslips: await tenant.payslip.count(),
+        payments: await tenant.payment.count(),
+      };
+      return { initialized: false, message: "Données déjà présentes", counts };
+    }
+
+    // Employés par défaut
+    await tenant.employee.createMany({
+      data: [
+        { nom: "Alpha Ndiaye", poste: "Développeur", typeContrat: "FIXE", tauxSalaire: '250000', joursTravailles: null, coordonneesBancaires: null, actif: true },
+        { nom: "Awa Diop", poste: "Comptable", typeContrat: "FIXE", tauxSalaire: '200000', joursTravailles: null, coordonneesBancaires: null, actif: true },
+        { nom: "Mamadou Sow", poste: "Agent", typeContrat: "JOURNALIER", tauxSalaire: '10000', joursTravailles: 20, coordonneesBancaires: null, actif: true },
+      ]
+    });
+
+    // PayRun du mois courant
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const payRun = await tenant.payRun.create({
+      data: { periode: startOfMonth, type: "MENSUEL" }
+    });
+
+    // Générer les bulletins pour chaque employé
+    const employees = await tenant.employee.findMany();
+    for (const emp of employees) {
+      const brut = (emp as any).tauxSalaire; // Decimal
+      const deductions: any = 0;
+      await tenant.payslip.create({
+        data: {
+          employeeId: emp.id,
+          payRunId: payRun.id,
+          brut: brut as any,
+          deductions: deductions,
+          net: brut as any,
+        }
+      });
+    }
+
+    const result = {
+      employees: await tenant.employee.count(),
+      payRuns: await tenant.payRun.count(),
+      payslips: await tenant.payslip.count(),
+    };
+
+    return { initialized: true, message: "Initialisation terminée", counts: result };
+  }
+
+  // Génère un jeton contextuel pour qu'un SUPER_ADMIN puisse opérer dans le contexte d'une entreprise (dbName inclus)
+  async impersonateEntreprise(entrepriseId: number, caller: { role: string; id: number }) {
+    if (caller.role !== "SUPER_ADMIN") {
+      throw new Error("Accès refusé : Super Admin requis");
+    }
+
+    const entreprise = await this.globalRepos.findEntrepriseById(entrepriseId);
+    if (!entreprise || !entreprise.dbName) {
+      throw new Error("Entreprise introuvable ou dbName manquant");
+    }
+
+    const currentUser = await this.globalRepos.findById(caller.id);
+
+    const accesToken = Jwt.sign(
+      {
+        id: caller.id,
+        email: currentUser?.email || "",
+        role: "SUPER_ADMIN",
+        entrepriseId: entreprise.id,
+        dbName: entreprise.dbName,
+      },
+      process.env.JWT_SECRETE as string,
+      { expiresIn: "1h" }
+    );
+
+    const entreprisePayload = {
+      id: entreprise.id,
+      nom: entreprise.nom,
+      logo: entreprise.logo,
+      adresse: entreprise.adresse,
+      paiement: entreprise.paiement,
+      dbName: entreprise.dbName,
+    };
+
+    return { accesToken, entreprise: entreprisePayload };
   }
 }
