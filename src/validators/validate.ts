@@ -91,6 +91,7 @@ export const employeeCreateSchema = z.object({
   joursTravailles: z.number().int().positive().optional(),
   coordonneesBancaires: z.string().optional(),
   actif: z.boolean().optional(),
+  entrepriseId: z.number().optional(),
 }).refine((data) => {
   if (data.typeContrat === "JOURNALIER") {
     return typeof data.joursTravailles === 'number' && data.joursTravailles > 0;

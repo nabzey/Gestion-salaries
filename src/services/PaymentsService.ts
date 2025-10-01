@@ -8,6 +8,10 @@ export class PaymentsService {
 
   async create(data: Omit<Payment, 'id' | 'createdAt' | 'updatedAt'>, dbName: string | null) {
     if (!dbName) throw new Error('dbName required');
+
+    // Validation du paiement
+    await this.validatePayment(data, dbName);
+
     // Créer le paiement
     const payment = await this.repo.create(data, dbName);
 
@@ -17,14 +21,54 @@ export class PaymentsService {
     return payment;
   }
 
+  private async validatePayment(data: Omit<Payment, 'id' | 'createdAt' | 'updatedAt'>, dbName: string) {
+    const { payslipId, montant } = data;
+
+    // Vérifier que le bulletin existe
+    const payslip = await this.payslipService.findById(payslipId, dbName);
+    if (!payslip) {
+      throw new Error('Bulletin de paie non trouvé');
+    }
+
+    // Vérifier que le bulletin n'est pas déjà payé
+    if (payslip.status === 'PAYE') {
+      throw new Error('Ce bulletin est déjà entièrement payé');
+    }
+
+    // Calculer le total déjà payé
+    const existingPayments = await this.repo.findByPayslipId(payslipId, dbName);
+    const totalPaid = existingPayments.reduce((sum, p) => sum + Number(p.montant), 0);
+
+    // Vérifier que le nouveau paiement ne dépasse pas le montant restant
+    const remainingAmount = Number(payslip.net) - totalPaid;
+    if (Number(montant) > remainingAmount) {
+      throw new Error(`Montant trop élevé. Maximum autorisé: ${remainingAmount} XOF`);
+    }
+
+    // Vérifier que le montant n'est pas négatif
+    if (Number(montant) <= 0) {
+      throw new Error('Le montant doit être positif');
+    }
+  }
+
   async findAll(dbName: string | null) {
     if (!dbName) throw new Error('dbName required');
-    return await this.repo.findAll(dbName);
+
+    // Récupérer tous les paiements avec leurs relations
+    const payments = await this.repo.findAll(dbName);
+
+    // Ne retourner que les paiements des cycles de paie clôturés
+    return payments.filter(payment => payment.payslip?.payRun?.status === 'CLOTURE');
   }
 
   async findById(id: number, dbName: string | null) {
     if (!dbName) throw new Error('dbName required');
     return await this.repo.findById(id, dbName);
+  }
+
+  async findByEmployeeId(employeeId: number, dbName: string | null) {
+    if (!dbName) throw new Error('dbName required');
+    return await this.repo.findByEmployeeId(employeeId, dbName);
   }
 
   async update(id: number, data: Partial<Payment>, dbName: string | null) {

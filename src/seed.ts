@@ -12,30 +12,35 @@ async function main() {
   console.log('🚀 Démarrage du seed...');
 
   // 1. Suppression de l'entreprise de démonstration si elle existe
-  const existing = await prisma.entreprises.findUnique({ 
-    where: { dbName: 'tenant_demo' } 
+  const existing = await prisma.entreprises.findUnique({
+    where: { dbName: 'tenante' }
   });
-  
+
   if (existing) {
     console.log('🗑️ Suppression de l\'ancienne entreprise de démonstration...');
     await prisma.users.deleteMany({ where: { entrepriseId: existing.id } });
     await prisma.entreprises.delete({ where: { id: existing.id } });
-    
+
     // Supprimer la base de données tenant correspondante
-    const connection = await mysql.createConnection({
-      host: '127.0.0.1',
-      user: 'zeynab',
-      password: 'Diamniadio14@'
-    });
-    await connection.query(`DROP DATABASE IF EXISTS \`tenant_demo\``);
-    await connection.end();
-    console.log('✅ Ancienne entreprise et base tenant supprimées.');
+    try {
+      const connection = await mysql.createConnection({
+        host: '127.0.0.1',
+        user: 'zeynab',
+        password: 'Diamniadio14@'
+      });
+      await connection.query(`DROP DATABASE IF EXISTS \`tenante\``);
+      await connection.end();
+      console.log('✅ Ancienne entreprise et base tenant supprimées.');
+    } catch (error) {
+      console.error('❌ Erreur lors de la suppression de la base tenant:', error);
+      throw error;
+    }
   }
 
   // 2. Création du SUPER_ADMIN (non rattaché à une entreprise)
   console.log('👤 Création du Super Admin...');
   const hashedPasswordSuperAdmin = await bcrypt.hash('superadmin123', 10);
-  
+
   // Vérifier si le super admin existe déjà
   const existingSuperAdmin = await prisma.users.findUnique({
     where: { email: 'superadmin@example.com' }
@@ -66,7 +71,7 @@ async function main() {
       logo: null,
       adresse: 'Dakar, Sénégal',
       paiement: 'XOF',
-      dbName: 'tenant_demo',
+      dbName: 'tenante',
     },
   });
   console.log(`✅ Entreprise créée avec ID: ${entreprise.id}`);
@@ -74,21 +79,27 @@ async function main() {
   // 4. Création de la base de données tenant correspondante
   console.log('🗄️ Création de la base de données tenant...');
   const dbName = entreprise.dbName!;
-  const connection = await mysql.createConnection({
-    host: '127.0.0.1',
-    user: 'zeynab',
-    password: 'Diamniadio14@'
-  });
-  
-  await connection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
-  await connection.end();
-  console.log(`✅ Base de données tenant créée: ${dbName}`);
+  try {
+    const connection = await mysql.createConnection({
+      host: '127.0.0.1',
+      user: 'zeynab',
+      password: 'Diamniadio14@'
+    });
+
+    await connection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
+    await connection.end();
+    console.log(`✅ Base de données tenant créée: ${dbName}`);
+  } catch (error) {
+    console.error('❌ Erreur création base tenant:', error);
+    throw error;
+  }
 
   // 5. Application des migrations Prisma sur la base tenant
   console.log('🔧 Application des migrations sur la base tenant...');
-const tenantUrl = `mysql://zeynab:Diamniadio14%40@127.0.0.1:3306/${dbName}`;
-  
+  const tenantUrl = `mysql://zeynab:Diamniadio14%40@127.0.0.1:3306/${dbName}`;
+
   try {
+    // Attention : ne pas modifier globalement process.env en prod ; ici c'est ok pour seed
     process.env.TENANT_DATABASE_URL = tenantUrl;
     execSync(
       `npx prisma db push --schema=prisma/tenant-schema.prisma --accept-data-loss`,
@@ -103,7 +114,7 @@ const tenantUrl = `mysql://zeynab:Diamniadio14%40@127.0.0.1:3306/${dbName}`;
   // 6. Création d'un ADMIN rattaché à l'entreprise
   console.log('👤 Création de l\'Admin...');
   const hashedPasswordAdmin = await bcrypt.hash('admin123', 10);
-  const admin = await prisma.users.create({
+  await prisma.users.create({
     data: {
       email: 'admin@demo.com',
       password: hashedPasswordAdmin,
@@ -117,7 +128,7 @@ const tenantUrl = `mysql://zeynab:Diamniadio14%40@127.0.0.1:3306/${dbName}`;
   // 7. Création d'un CAISSIER rattaché à l'entreprise
   console.log('👤 Création du Caissier...');
   const hashedPasswordCaissier = await bcrypt.hash('caissier123', 10);
-  const caissier = await prisma.users.create({
+  await prisma.users.create({
     data: {
       email: 'caissier@demo.com',
       password: hashedPasswordCaissier,

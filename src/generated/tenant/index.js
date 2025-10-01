@@ -198,7 +198,7 @@ const config = {
       "value": "prisma-client-js"
     },
     "output": {
-      "value": "/home/zeynab/Bureau/REACT/gestionnaire_salaries/Back-end/src/generated/tenant",
+      "value": "/home/zeynab/Bureau/REACT/gestionnaire_salaries (2)/Back-end/src/generated/tenant",
       "fromEnvVar": null
     },
     "config": {
@@ -212,7 +212,7 @@ const config = {
       }
     ],
     "previewFeatures": [],
-    "sourceFilePath": "/home/zeynab/Bureau/REACT/gestionnaire_salaries/Back-end/prisma/tenant-schema.prisma",
+    "sourceFilePath": "/home/zeynab/Bureau/REACT/gestionnaire_salaries (2)/Back-end/prisma/tenant-schema.prisma",
     "isCustomOutput": true
   },
   "relativeEnvPaths": {

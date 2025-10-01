@@ -1,4 +1,4 @@
-import { Users, Entreprises, PrismaClient } from "@prisma/client";
+import { Users, Entreprises } from "@prisma/client";
 import bcrypt from "bcrypt";
 import Jwt from "jsonwebtoken";
 import mysql from 'mysql2/promise';
@@ -7,7 +7,6 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { getTenantPrisma } from "../utils/tenantPrisma";
-
 import { UsersRepository } from "../repositories/UsersRepository";
 
 export class UsersService {
@@ -20,7 +19,6 @@ export class UsersService {
   }
 
   async create(user: Omit<Users, "id">, caller: { role: string; entrepriseId?: number | null; id: number }) {
-    
     if (caller.role === "SUPER_ADMIN") {
       return await this.globalRepos.create({
         ...user,
@@ -66,7 +64,6 @@ export class UsersService {
       const entreprise = await this.globalRepos.findEntrepriseById(user.entrepriseId);
       dbName = entreprise?.dbName || null;
       if (entreprise) {
-        // Inclure des infos d'entreprise dans la réponse pour ADMIN/CAISSIER
         entreprisePayload = {
           id: entreprise.id,
           nom: entreprise.nom,
@@ -84,9 +81,9 @@ export class UsersService {
         email: user.email,
         role: role,
         entrepriseId: user.entrepriseId,
-        dbName: dbName || (null as any)
+        dbName: dbName || null,
       },
-      process.env.JWT_SECRETE as string,
+      process.env.JWT_SECRET as string,
       { expiresIn: "1h" }
     );
 
@@ -95,7 +92,7 @@ export class UsersService {
         email: user.email,
         role: role
       },
-      process.env.JWT_SECRETE as string,
+      process.env.JWT_SECRET as string,
       { expiresIn: "1d" }
     );
 
@@ -124,10 +121,10 @@ export class UsersService {
     // Créer la DB tenant
     const parsed = new URL(process.env.DATABASE_URL!);
     const dbUser = parsed.username;
-    const dbPass = parsed.password;
+    const dbPass = decodeURIComponent(parsed.password);
     const host = parsed.hostname;
     const port = parsed.port || '3306';
-    const tenantUrl = `mysql://${dbUser}:${dbPass}@${host}:${port}/${dbName}`;
+    const tenantUrl = `mysql://${dbUser}:${encodeURIComponent(dbPass)}@${host}:${port}/${dbName}`;
 
     try {
       console.log('[CREATE ENTREPRISE] Connexion MySQL pour création DB', { host, dbUser, port, dbName });
@@ -150,7 +147,7 @@ export class UsersService {
     }
 
     try {
-      process.env.TENANT_DATABASE_URL = tenantUrl;
+      // Utiliser une variable locale pour éviter de modifier process.env globalement
       console.log('[CREATE ENTREPRISE] Push Prisma sur DB tenant', tenantUrl);
       execSync(`npx prisma db push --schema=./prisma/tenant-schema.prisma --accept-data-loss`, {
         stdio: 'inherit',
@@ -201,37 +198,77 @@ export class UsersService {
       await this.create(caissierData, { role: "SUPER_ADMIN", entrepriseId: null, id: userId });
     }
 
-    return { ...entreprise, dbName };
+    // Initialiser les données par défaut (employés, etc.)
+    try {
+      await this.initEntrepriseData(entreprise.id, { role: 'SUPER_ADMIN', entrepriseId: null, id: userId });
+    } catch (error) {
+      console.error('Erreur lors de l\'initialisation des données de l\'entreprise:', error);
+      // Ne pas échouer la création
+    }
+
+    return entreprise; // Retour explicite pour le contrôleur
   }
 
   async getAllEntreprises(user: { role: string; entrepriseId?: number | null; id: number }) {
-    // SUPER_ADMIN voit toutes les entreprises
     if (user.role === "SUPER_ADMIN") {
-      return await this.globalRepos.findAllEntreprises();
-    } 
-    
-    // ADMIN voit seulement son entreprise
+      const entreprises = await this.globalRepos.findAllEntreprises();
+      // Ajouter le nombre d'employés pour chaque entreprise
+      const entreprisesWithEmployees = await Promise.all(
+        entreprises.map(async (entreprise) => {
+          let employeeCount = 0;
+          if (entreprise.dbName) {
+            try {
+              const tenant = getTenantPrisma(entreprise.dbName);
+              employeeCount = await tenant.employee.count();
+            } catch (error) {
+              console.error(`Erreur récupération employés pour ${entreprise.nom}:`, error);
+            }
+          }
+          return {
+            ...entreprise,
+            _count: {
+              ...(entreprise as any)._count,
+              employees: employeeCount
+            }
+          };
+        })
+      );
+      return entreprisesWithEmployees;
+    }
+
     if (user.role === "ADMIN" && user.entrepriseId) {
       const entreprise = await this.globalRepos.findEntrepriseById(user.entrepriseId);
+      if (entreprise && entreprise.dbName) {
+        try {
+          const tenant = getTenantPrisma(entreprise.dbName);
+          const employeeCount = await tenant.employee.count();
+          return [{
+            ...entreprise,
+            _count: {
+              ...(entreprise as any)._count,
+              employees: employeeCount
+            }
+          }];
+        } catch (error) {
+          console.error(`Erreur récupération employés pour ${entreprise.nom}:`, error);
+          return [entreprise];
+        }
+      }
       return entreprise ? [entreprise] : [];
     }
 
-    // CAISSIER ne voit rien ou peut voir son entreprise selon vos besoins
     return [];
   }
 
-  // Nouvelle méthode pour récupérer les utilisateurs d'une entreprise
   async getUsersByEntreprise(caller: { role: string; entrepriseId?: number | null; id: number }, entrepriseId?: number) {
     if (caller.role === "SUPER_ADMIN") {
-      // SUPER_ADMIN peut voir les utilisateurs de n'importe quelle entreprise
       if (entrepriseId) {
         return await this.globalRepos.findUsersByEntrepriseId(entrepriseId);
       }
       return await this.globalRepos.findAllUsers();
     }
-    
+
     if (caller.role === "ADMIN" && caller.entrepriseId) {
-      // ADMIN peut voir seulement les utilisateurs de son entreprise
       return await this.globalRepos.findUsersByEntrepriseId(caller.entrepriseId);
     }
 
@@ -254,18 +291,15 @@ export class UsersService {
     const entreprise = await this.globalRepos.findEntrepriseById(entrepriseId);
     if (!entreprise || !entreprise.dbName) throw new Error('Entreprise introuvable');
 
-    // Users from global DB
     const admins = await this.globalRepos.findUsersByEntrepriseIdAndRole(entrepriseId, 'ADMIN');
     const caissiers = await this.globalRepos.findUsersByEntrepriseIdAndRole(entrepriseId, 'CAISSIER');
 
-    // Employees from tenant DB
     const tenant = getTenantPrisma(entreprise.dbName);
     const employees = await tenant.employee.findMany();
 
     return { admins, caissiers, employees };
   }
 
-  // Initialise des données par défaut (employés, payrun, bulletins) dans la base tenant d'une entreprise
   async initEntrepriseData(
     entrepriseId: number,
     caller: { role: string; entrepriseId?: number | null; id: number }
@@ -280,7 +314,6 @@ export class UsersService {
 
     const tenant = getTenantPrisma(entreprise.dbName);
 
-    // Si déjà des données existent, ne pas dupliquer
     const existingEmp = await tenant.employee.count();
     if (existingEmp > 0) {
       const counts = {
@@ -292,7 +325,6 @@ export class UsersService {
       return { initialized: false, message: "Données déjà présentes", counts };
     }
 
-    // Employés par défaut
     await tenant.employee.createMany({
       data: [
         { nom: "Alpha Ndiaye", poste: "Développeur", typeContrat: "FIXE", tauxSalaire: '250000', joursTravailles: null, coordonneesBancaires: null, actif: true },
@@ -301,7 +333,6 @@ export class UsersService {
       ]
     });
 
-    // PayRun du mois courant
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
@@ -310,10 +341,9 @@ export class UsersService {
       data: { periode: startOfMonth, type: "MENSUEL" }
     });
 
-    // Générer les bulletins pour chaque employé
     const employees = await tenant.employee.findMany();
     for (const emp of employees) {
-      const brut = (emp as any).tauxSalaire; // Decimal
+      const brut = (emp as any).tauxSalaire;
       const deductions: any = 0;
       await tenant.payslip.create({
         data: {
@@ -335,7 +365,39 @@ export class UsersService {
     return { initialized: true, message: "Initialisation terminée", counts: result };
   }
 
-  // Génère un jeton contextuel pour qu'un SUPER_ADMIN puisse opérer dans le contexte d'une entreprise (dbName inclus)
+  async getGlobalStats(user: { role: string; entrepriseId?: number | null; id: number }) {
+    if (user.role !== "SUPER_ADMIN") {
+      throw new Error("Accès refusé : Super Admin requis");
+    }
+
+    const entreprises = await this.globalRepos.findAllEntreprises();
+    const totalEntreprises = entreprises.length;
+    const entreprisesActives = entreprises.length; // Toutes sont actives pour l'instant
+
+    let totalEmployes = 0;
+    for (const entreprise of entreprises) {
+      if (entreprise.dbName) {
+        try {
+          const tenant = getTenantPrisma(entreprise.dbName);
+          const count = await tenant.employee.count();
+          totalEmployes += count;
+        } catch (error) {
+          console.error(`Erreur comptage employés pour ${entreprise.nom}:`, error);
+        }
+      }
+    }
+
+    // Pour le CA total, on pourrait calculer basé sur les salaires, mais pour l'instant on met 0
+    const caTotal = 0;
+
+    return {
+      totalEntreprises,
+      entreprisesActives,
+      totalEmployes,
+      caTotal
+    };
+  }
+
   async impersonateEntreprise(entrepriseId: number, caller: { role: string; id: number }) {
     if (caller.role !== "SUPER_ADMIN") {
       throw new Error("Accès refusé : Super Admin requis");
@@ -356,7 +418,7 @@ export class UsersService {
         entrepriseId: entreprise.id,
         dbName: entreprise.dbName,
       },
-      process.env.JWT_SECRETE as string,
+      process.env.JWT_SECRET as string,
       { expiresIn: "1h" }
     );
 

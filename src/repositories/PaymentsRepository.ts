@@ -10,7 +10,14 @@ export class PaymentsRepository {
   async findAll(dbName: string) {
     const prisma = getTenantPrisma(dbName);
     return await prisma.payment.findMany({
-      include: { payslip: { include: { employee: true } } }
+      include: {
+        payslip: {
+          include: {
+            employee: true,
+            payRun: true
+          }
+        }
+      }
     });
   }
 
@@ -40,6 +47,23 @@ export class PaymentsRepository {
     const prisma = getTenantPrisma(dbName);
     return await prisma.payment.findMany({
       where: { payslipId },
+      orderBy: { date: 'desc' }
+    });
+  }
+
+  async findByEmployeeId(employeeId: number, dbName: string) {
+    const prisma = getTenantPrisma(dbName);
+    return await prisma.payment.findMany({
+      where: {
+        payslip: {
+          employeeId
+        }
+      },
+      include: {
+        payslip: {
+          include: { employee: true }
+        }
+      },
       orderBy: { date: 'desc' }
     });
   }

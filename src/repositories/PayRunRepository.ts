@@ -31,6 +31,27 @@ export class PayRunRepository {
     return await client.payRun.delete({ where: { id } });
   }
 
+  async findByStatus(status: StatusPayRun, client: PrismaClient) {
+    return await client.payRun.findMany({
+      where: { status },
+      include: { payslips: { include: { employee: true } } },
+      orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  async findByPeriod(startDate: Date, endDate: Date, client: PrismaClient) {
+    return await client.payRun.findMany({
+      where: {
+        periode: {
+          gte: startDate,
+          lte: endDate
+        }
+      },
+      include: { payslips: { include: { employee: true } } },
+      orderBy: { createdAt: 'desc' }
+    });
+  }
+
   async generatePayslips(payRunId: number, client: PrismaClient) {
     // Get all active employees
     const employees = await client.employee.findMany({ where: { actif: true } });

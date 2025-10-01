@@ -26,7 +26,7 @@ export const authenticateToken = async (req: Request, res: Response, next: NextF
     return res.status(401).json({ message: 'Token manquant' });
   }
 
-  Jwt.verify(token, process.env.JWT_SECRETE as string, async (err: any, decoded: any) => {
+  Jwt.verify(token, process.env.JWT_SECRET as string, async (err: any, decoded: any) => {
     if (err) {
       return res.status(403).json({ message: 'Token invalide' });
     }
@@ -60,6 +60,17 @@ export const requireSuperAdmin = (req: Request, res: Response, next: NextFunctio
   next();
 };
 
+// Middleware pour ADMIN ou SUPER_ADMIN (ancien comportement, accès complet)
+export const requireAdminOrSuperAdminRestricted = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    return res.status(403).json({ message: 'Accès refusé : Authentification requise' });
+  }
+  if (req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN') {
+    return next();
+  }
+  return res.status(403).json({ message: 'Accès refusé : Admin ou Super Admin requis' });
+};
+
 // Middleware pour ADMIN ou SUPER_ADMIN
 export const requireAdminOrSuperAdmin = (req: Request, res: Response, next: NextFunction) => {
   if (!req.user || (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN')) {
@@ -68,12 +79,23 @@ export const requireAdminOrSuperAdmin = (req: Request, res: Response, next: Next
   next();
 };
 
-// Middleware pour ADMIN ou CAISSIER
+// Middleware pour ADMIN, CAISSIER ou SUPER_ADMIN
 export const requireAdminOrCaissier = (req: Request, res: Response, next: NextFunction) => {
-  if (!req.user || (req.user.role !== 'ADMIN' && req.user.role !== 'CAISSIER')) {
-    return res.status(403).json({ message: 'Accès refusé : Admin ou Caissier requis' });
+  if (!req.user || (req.user.role !== 'ADMIN' && req.user.role !== 'CAISSIER' && req.user.role !== 'SUPER_ADMIN')) {
+    return res.status(403).json({ message: 'Accès refusé : Admin, Caissier ou Super Admin requis' });
   }
   next();
+};
+
+// Middleware pour ADMIN, CAISSIER ou SUPER_ADMIN (ancien comportement, accès complet)
+export const requireAdminOrCaissierRestricted = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    return res.status(403).json({ message: 'Accès refusé : Authentification requise' });
+  }
+  if (req.user.role === 'ADMIN' || req.user.role === 'CAISSIER' || req.user.role === 'SUPER_ADMIN') {
+    return next();
+  }
+  return res.status(403).json({ message: 'Accès refusé : Admin, Caissier ou Super Admin requis' });
 };
 
 // Middleware pour vérifier que l'ADMIN opère dans sa propre entreprise

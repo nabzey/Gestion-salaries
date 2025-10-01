@@ -1,31 +1,15 @@
 import { Request, Response } from 'express';
 import { PayRunService } from '../services/PayRunService';
-import { payRunCreateSchema, payRunUpdateSchema } from '../validators/validate';
+import { StatusPayRun } from '../generated/tenant';
 
 export class PayRunController {
   private service = new PayRunService();
 
-  async create(req: Request, res: Response) {
-    try {
-      const validatedData = payRunCreateSchema.parse(req.body);
-      const dbName = req.user?.dbName;
-      if (!dbName) return res.status(400).json({ message: 'dbName manquant' });
-
-      const payRun = await this.service.create({
-        ...validatedData,
-        periode: new Date(validatedData.periode),
-        status: validatedData.status || ('BROUILLON' as const)
-      }, dbName);
-      res.status(201).json(payRun);
-    } catch (error: any) {
-      res.status(400).json({ message: error.message });
-    }
-  }
-
   async getAll(req: Request, res: Response) {
     try {
-      const dbName = req.user?.dbName;
-      if (!dbName) return res.status(400).json({ message: 'dbName manquant' });
+      if (!req.user) return res.status(400).json({ message: 'Utilisateur non authentifié' });
+      if (!req.user.dbName) return res.json([]);
+      const dbName = req.user.dbName;
 
       const payRuns = await this.service.findAll(dbName);
       res.json(payRuns);
@@ -37,8 +21,9 @@ export class PayRunController {
   async getById(req: Request, res: Response) {
     try {
       const id = parseInt(req.params.id as string);
-      const dbName = req.user?.dbName;
-      if (!dbName) return res.status(400).json({ message: 'dbName manquant' });
+      if (!req.user) return res.status(400).json({ message: 'Utilisateur non authentifié' });
+      if (!req.user.dbName) return res.status(404).json({ message: 'PayRun non trouvé' });
+      const dbName = req.user.dbName;
 
       const payRun = await this.service.findById(id, dbName);
       if (!payRun) return res.status(404).json({ message: 'PayRun non trouvé' });
@@ -49,69 +34,60 @@ export class PayRunController {
     }
   }
 
-  async update(req: Request, res: Response) {
+  async approvePayRun(req: Request, res: Response) {
     try {
       const id = parseInt(req.params.id as string);
-      const validatedData = payRunUpdateSchema.parse(req.body);
-      const dbName = req.user?.dbName;
-      if (!dbName) return res.status(400).json({ message: 'dbName manquant' });
+      if (!req.user) return res.status(400).json({ message: 'Utilisateur non authentifié' });
+      if (!req.user.dbName) return res.status(400).json({ message: 'Action non autorisée' });
+      const dbName = req.user.dbName;
 
-      const payRun = await this.service.update(id, validatedData, dbName);
-      res.json(payRun);
+      const payRun = await this.service.approvePayRun(id, dbName);
+      res.json({ message: 'PayRun approuvé', payRun });
     } catch (error: any) {
       res.status(400).json({ message: error.message });
     }
   }
 
-  async delete(req: Request, res: Response) {
+  async closePayRun(req: Request, res: Response) {
     try {
       const id = parseInt(req.params.id as string);
-      const dbName = req.user?.dbName;
-      if (!dbName) return res.status(400).json({ message: 'dbName manquant' });
+      if (!req.user) return res.status(400).json({ message: 'Utilisateur non authentifié' });
+      if (!req.user.dbName) return res.status(400).json({ message: 'Action non autorisée' });
+      const dbName = req.user.dbName;
 
-      await this.service.delete(id, dbName);
-      res.status(204).send();
+      const payRun = await this.service.closePayRun(id, dbName);
+      res.json({ message: 'PayRun clôturé', payRun });
+    } catch (error: any) {
+      res.status(400).json({ message: error.message });
+    }
+  }
+
+  async getByStatus(req: Request, res: Response) {
+    try {
+      const status = req.params.status as StatusPayRun;
+      if (!req.user) return res.status(400).json({ message: 'Utilisateur non authentifié' });
+      if (!req.user.dbName) return res.json([]);
+      const dbName = req.user.dbName;
+
+      const payRuns = await this.service.getPayRunsByStatus(status, dbName);
+      res.json(payRuns);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
   }
 
-  async generatePayslips(req: Request, res: Response) {
+  async getByPeriod(req: Request, res: Response) {
     try {
-      const id = parseInt(req.params.id as string);
-      const dbName = req.user?.dbName;
-      if (!dbName) return res.status(400).json({ message: 'dbName manquant' });
+      const year = parseInt(req.params.year as string);
+      const month = parseInt(req.params.month as string);
+      if (!req.user) return res.status(400).json({ message: 'Utilisateur non authentifié' });
+      if (!req.user.dbName) return res.json([]);
+      const dbName = req.user.dbName;
 
-      const payslips = await this.service.generatePayslips(id, dbName);
-      res.json(payslips);
+      const payRuns = await this.service.getPayRunsByPeriod(year, month, dbName);
+      res.json(payRuns);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
-    }
-  }
-
-  async approve(req: Request, res: Response) {
-    try {
-      const id = parseInt(req.params.id as string);
-      const dbName = req.user?.dbName;
-      if (!dbName) return res.status(400).json({ message: 'dbName manquant' });
-
-      const payRun = await this.service.approve(id, dbName);
-      res.json(payRun);
-    } catch (error: any) {
-      res.status(400).json({ message: error.message });
-    }
-  }
-
-  async close(req: Request, res: Response) {
-    try {
-      const id = parseInt(req.params.id as string);
-      const dbName = req.user?.dbName;
-      if (!dbName) return res.status(400).json({ message: 'dbName manquant' });
-
-      const payRun = await this.service.close(id, dbName);
-      res.json(payRun);
-    } catch (error: any) {
-      res.status(400).json({ message: error.message });
     }
   }
 }

@@ -5,9 +5,11 @@ CREATE TABLE `Entreprises` (
     `logo` VARCHAR(191) NULL,
     `adresse` VARCHAR(191) NOT NULL,
     `paiement` VARCHAR(191) NOT NULL DEFAULT 'XOF',
+    `dbName` VARCHAR(191) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
 
+    UNIQUE INDEX `Entreprises_dbName_key`(`dbName`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

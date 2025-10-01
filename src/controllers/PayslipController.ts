@@ -1,9 +1,7 @@
 import { Request, Response } from 'express';
 import { PayslipService } from '../services/PayslipService';
 import { payslipUpdateSchema } from '../validators/validate';
-import pdfMake from 'pdfmake/build/pdfmake';
-import pdfFonts from 'pdfmake/build/vfs_fonts';
-pdfMake.vfs = pdfFonts.vfs;
+import { PDFGenerator } from '../utils/pdfGenerator';
 
 export class PayslipController {
   private service = new PayslipService();
@@ -13,7 +11,8 @@ export class PayslipController {
       const filters: { payRunId?: number; employeeId?: number } = {};
       if (req.query.payRunId) filters.payRunId = parseInt(req.query.payRunId as string);
       if (req.query.employeeId) filters.employeeId = parseInt(req.query.employeeId as string);
-      if (!req.user || !req.user.dbName) return res.status(400).json({ message: 'dbName manquant' });
+      if (!req.user) return res.status(400).json({ message: 'Utilisateur non authentifié' });
+      if (!req.user.dbName) return res.json([]);
       const dbName = req.user.dbName;
 
       const payslips = await this.service.findAll(filters, dbName);
@@ -26,7 +25,8 @@ export class PayslipController {
   async getById(req: Request, res: Response) {
     try {
       const id = parseInt(req.params.id as string);
-      if (!req.user || !req.user.dbName) return res.status(400).json({ message: 'dbName manquant' });
+      if (!req.user) return res.status(400).json({ message: 'Utilisateur non authentifié' });
+      if (!req.user.dbName) return res.status(404).json({ message: 'Payslip non trouvé' });
       const dbName = req.user.dbName;
 
       const payslip = await this.service.findById(id, dbName);
@@ -42,7 +42,8 @@ export class PayslipController {
     try {
       const id = parseInt(req.params.id as string);
       const validatedData = payslipUpdateSchema.parse(req.body);
-      if (!req.user || !req.user.dbName) return res.status(400).json({ message: 'dbName manquant' });
+      if (!req.user) return res.status(400).json({ message: 'Utilisateur non authentifié' });
+      if (!req.user.dbName) return res.status(400).json({ message: 'Action non autorisée' });
       const dbName = req.user.dbName;
 
       const payslip = await this.service.update(id, validatedData, dbName);
@@ -57,8 +58,9 @@ export class PayslipController {
       const id = parseInt(req.params.id as string);
       const { status } = req.body;
       if (!status) return res.status(400).json({ message: 'Status requis' });
-      const dbName = req.user?.dbName;
-      if (!dbName) return res.status(400).json({ message: 'dbName manquant' });
+      if (!req.user) return res.status(400).json({ message: 'Utilisateur non authentifié' });
+      if (!req.user.dbName) return res.status(400).json({ message: 'Action non autorisée' });
+      const dbName = req.user.dbName;
 
       const payslip = await this.service.updateStatus(id, status, dbName);
       res.json(payslip);
@@ -67,38 +69,43 @@ export class PayslipController {
     }
   }
 
+  async generateMonthlyPayslips(req: Request, res: Response) {
+    try {
+      if (!req.user) return res.status(400).json({ message: 'Utilisateur non authentifié' });
+      if (!req.user.dbName) return res.status(400).json({ message: 'Veuillez sélectionner une entreprise pour générer les bulletins' });
+      const dbName = req.user.dbName;
+      const { period } = req.body;
+
+      const result = await this.service.generateMonthlyPayslips(dbName, period);
+      res.json({
+        message: 'Bulletins générés avec succès',
+        data: result
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+
   async generatePDF(req: Request, res: Response) {
     try {
       const id = parseInt(req.params.id as string);
-      if (!req.user || !req.user.dbName) return res.status(400).json({ message: 'dbName manquant' });
+      if (!req.user) return res.status(400).json({ message: 'Utilisateur non authentifié' });
+      if (!req.user.dbName) return res.status(404).json({ message: 'Bulletin non trouvé' });
       const dbName = req.user.dbName;
 
+      // Vérifier que le cycle de paie n'est pas en brouillon
       const payslip = await this.service.findById(id, dbName);
-      if (!payslip) return res.status(404).json({ message: 'Payslip non trouvé' });
+      if (!payslip) return res.status(404).json({ message: 'Bulletin non trouvé' });
 
-      const docDefinition: any = {
-        content: [
-          { text: 'Bulletin de Paie', style: 'header' },
-          { text: `Employé: ${payslip.employee.nom}`, margin: [0, 10, 0, 0] },
-          { text: `Poste: ${payslip.employee.poste}`, margin: [0, 5, 0, 0] },
-          { text: `Cycle: ${payslip.payRun.periode} (${payslip.payRun.type})`, margin: [0, 5, 0, 0] },
-          { text: `Brut: ${payslip.brut} XOF`, margin: [0, 10, 0, 0] },
-          { text: `Déductions: ${payslip.deductions} XOF`, margin: [0, 5, 0, 0] },
-          { text: `Net à payer: ${payslip.net} XOF`, margin: [0, 5, 0, 0] },
-          { text: `Statut: ${payslip.status}`, margin: [0, 10, 0, 0] },
-          { text: 'Signature:', alignment: 'right', margin: [0, 20, 0, 0] }
-        ],
-        styles: {
-          header: { fontSize: 18, bold: true, margin: [0, 0, 0, 10] }
-        }
-      };
+      if (payslip.payRun.status === 'BROUILLON') {
+        return res.status(400).json({ message: 'Le cycle de paie est en brouillon. Approuvez-le d\'abord pour télécharger les bulletins.' });
+      }
 
-      const pdfDoc = pdfMake.createPdf(docDefinition);
-      pdfDoc.getBuffer((buffer: any) => {
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename=bulletin_${id}.pdf`);
-        res.send(buffer);
-      });
+      const buffer = await PDFGenerator.generatePayslipPDF(id, dbName);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename=bulletin_${id}.pdf`);
+      res.send(buffer);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
